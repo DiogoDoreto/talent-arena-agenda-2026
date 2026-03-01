@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import './App.css'
 import eventsRaw from './events.json'
 
@@ -20,6 +20,36 @@ interface Event {
 }
 
 const events = eventsRaw as Event[]
+
+// ── Liked events hook ────────────────────────────────────────────────────────
+
+const LIKED_KEY = 'talent-arena-liked-events'
+
+function useLikedEvents(): [Set<number>, (postId: number) => void] {
+  const [liked, setLiked] = useState<Set<number>>(() => {
+    try {
+      const raw = localStorage.getItem(LIKED_KEY)
+      return raw ? new Set<number>(JSON.parse(raw)) : new Set<number>()
+    } catch {
+      return new Set<number>()
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem(LIKED_KEY, JSON.stringify([...liked]))
+  }, [liked])
+
+  const toggle = useCallback((postId: number) => {
+    setLiked(prev => {
+      const next = new Set(prev)
+      if (next.has(postId)) next.delete(postId)
+      else next.add(postId)
+      return next
+    })
+  }, [])
+
+  return [liked, toggle]
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -87,10 +117,10 @@ function toICSDate(date: string, hhmm: string): string {
 function generateICS(event: Event): string {
   const [startHHMM, endHHMM] = event.time_slot.split('-')
   const dtstart = toICSDate(event.date, startHHMM)
-  const dtend   = toICSDate(event.date, endHHMM)
-  const uid     = `talent-arena-2026-${event.post_id}@talentarena.co`
+  const dtend = toICSDate(event.date, endHHMM)
+  const uid = `talent-arena-2026-${event.post_id}@talentarena.co`
   const speakers = event.speakers.length > 0 ? `\nSpeakers: ${event.speakers.join(', ')}` : ''
-  const summary  = event.title.replace(/,/g, '\\,').replace(/;/g, '\\;')
+  const summary = event.title.replace(/,/g, '\\,').replace(/;/g, '\\;')
   const location = `${event.stage}, Talent Arena 2026, Barcelona`
   const description = `${event.event_type.toUpperCase()}${speakers}`
     .replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\\n')
@@ -116,9 +146,9 @@ function generateICS(event: Event): string {
 function downloadICS(event: Event): void {
   const ics = generateICS(event)
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  a.href     = url
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
   a.download = `${event.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.ics`
   document.body.appendChild(a)
   a.click()
@@ -148,21 +178,23 @@ function EventCard({
   event,
   dayStart,
   colIndex,
+  liked,
   onClick,
 }: {
   event: Event
   dayStart: number
   colIndex: number
+  liked: boolean
   onClick: (e: Event) => void
 }) {
   const { start, end } = parseSlot(event.time_slot)
   const rowStart = (start - dayStart) * PX_PER_MIN + 1
-  const rowEnd   = (end   - dayStart) * PX_PER_MIN + 1
-  const height   = rowEnd - rowStart
+  const rowEnd = (end - dayStart) * PX_PER_MIN + 1
+  const height = rowEnd - rowStart
 
   return (
     <div
-      className={`event-card type-${event.event_type}`}
+      className={`event-card type-${event.event_type}${liked ? ' liked' : ''}`}
       style={{
         gridColumn: colIndex + 2, // +2 because col 1 is the time gutter
         position: 'absolute',
@@ -174,9 +206,12 @@ function EventCard({
       onClick={() => onClick(event)}
       title={event.title}
     >
-      {event.pass_type === 'n-xpro' && (
-        <span className="pass-badge xpro">XPRO</span>
-      )}
+      <div className="card-badges">
+        {liked && <span className="pass-badge liked-badge">♥</span>}
+        {event.pass_type === 'n-xpro' && (
+          <span className="pass-badge xpro">XPRO</span>
+        )}
+      </div>
       <div className="event-card-time">{event.time_slot}</div>
       <div className="event-card-title">{event.title}</div>
       {event.speakers.length > 0 && (
@@ -192,7 +227,17 @@ function EventCard({
   )
 }
 
-function EventModal({ event, onClose }: { event: Event; onClose: () => void }) {
+function EventModal({
+  event,
+  liked,
+  onToggleLike,
+  onClose,
+}: {
+  event: Event
+  liked: boolean
+  onToggleLike: (postId: number) => void
+  onClose: () => void
+}) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -233,6 +278,13 @@ function EventModal({ event, onClose }: { event: Event; onClose: () => void }) {
           <button className="btn-add-to-calendar" onClick={() => downloadICS(event)}>
             + Add to my calendar
           </button>
+          <button
+            className={`btn-like${liked ? ' liked' : ''}`}
+            onClick={() => onToggleLike(event.post_id)}
+            title={liked ? 'Remove from favourites' : 'Add to favourites'}
+          >
+            {liked ? '♥' : '♡'}
+          </button>
         </div>
 
         {event.speakers.length > 0 && (
@@ -262,8 +314,28 @@ function EventModal({ event, onClose }: { event: Event; onClose: () => void }) {
 export default function App() {
   const [selectedDay, setSelectedDay] = useState(DAYS[0])
   const [activeEvent, setActiveEvent] = useState<Event | null>(null)
+  const [liked, toggleLike] = useLikedEvents()
 
-  const dayEvents = events.filter(e => e.date === selectedDay)
+  // All event types enabled by default; liked-only filter off by default
+  const ALL_TYPES = LEGEND_ITEMS.map(item => item.type)
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(ALL_TYPES))
+  const [likedOnly, setLikedOnly] = useState(false)
+
+  const toggleType = useCallback((type: string) => {
+    setActiveTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }, [])
+
+  const dayEvents = events.filter(e => {
+    if (e.date !== selectedDay) return false
+    if (!activeTypes.has(e.event_type)) return false
+    if (likedOnly && !liked.has(e.post_id)) return false
+    return true
+  })
 
   // Only show stages that have at least one event today
   const activeStages = ALL_STAGES.filter(s => dayEvents.some(e => e.stage === s))
@@ -271,9 +343,9 @@ export default function App() {
   // Time range for the day
   const allTimes = dayEvents.map(e => parseSlot(e.time_slot))
   const dayStart = Math.min(...allTimes.map(t => t.start))
-  const dayEnd   = Math.max(...allTimes.map(t => t.end))
+  const dayEnd = Math.max(...allTimes.map(t => t.end))
   const totalMinutes = dayEnd - dayStart
-  const totalHeight  = totalMinutes * PX_PER_MIN
+  const totalHeight = totalMinutes * PX_PER_MIN
 
   // Hour tick marks
   const hourTicks: number[] = []
@@ -283,7 +355,7 @@ export default function App() {
   }
 
   const handleCardClick = useCallback((e: Event) => setActiveEvent(e), [])
-  const handleClose     = useCallback(() => setActiveEvent(null), [])
+  const handleClose = useCallback(() => setActiveEvent(null), [])
 
   const gridTemplateColumns = `${GUTTER_W}px ${activeStages.map(() => `${COL_W}px`).join(' ')}`
 
@@ -308,13 +380,25 @@ export default function App() {
         </div>
       </header>
 
-      {/* Legend */}
+      {/* Filter bar */}
       <div className="legend">
+        Filter:
+        <button
+          className={`legend-item legend-item-btn${likedOnly ? ' active' : ''}`}
+          onClick={() => setLikedOnly(v => !v)}
+        >
+          <span className="legend-dot legend-dot-liked" />
+          ♥ Liked
+        </button>
         {LEGEND_ITEMS.map(({ type, color }) => (
-          <span key={type} className="legend-item">
+          <button
+            key={type}
+            className={`legend-item legend-item-btn${activeTypes.has(type) ? ' active' : ''}`}
+            onClick={() => toggleType(type)}
+          >
             <span className="legend-dot" style={{ background: color }} />
             {TYPE_LABELS[type]}
-          </span>
+          </button>
         ))}
       </div>
 
@@ -429,6 +513,7 @@ export default function App() {
                   event={event}
                   dayStart={dayStart}
                   colIndex={colIndex}
+                  liked={liked.has(event.post_id)}
                   onClick={handleCardClick}
                 />
               )
@@ -439,7 +524,12 @@ export default function App() {
 
       {/* Event detail modal */}
       {activeEvent && (
-        <EventModal event={activeEvent} onClose={handleClose} />
+        <EventModal
+          event={activeEvent}
+          liked={liked.has(activeEvent.post_id)}
+          onToggleLike={toggleLike}
+          onClose={handleClose}
+        />
       )}
     </div>
   )
