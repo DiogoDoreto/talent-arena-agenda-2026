@@ -356,6 +356,34 @@
   margin-bottom: 10px;
 }
 
+.modal-actions {
+  margin-top: 4px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-add-to-calendar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #1a2a4a;
+  color: #6699dd;
+  border: 1px solid #2d4a7a;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-add-to-calendar:hover {
+  background: #243460;
+  color: #88bbff;
+  border-color: #4466aa;
+}
+
 /* ── Legend ──────────────────────────────────────────────────────── */
 .legend {
   display: flex;

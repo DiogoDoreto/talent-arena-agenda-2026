@@ -63,6 +63,69 @@ function fmtTime(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+// ── Calendar export ──────────────────────────────────────────────────────────
+
+// Talent Arena 2026 is in Barcelona (UTC+1 in March — CET, no DST yet)
+const YEAR = 2026
+const MONTH_MAP: Record<string, number> = {
+  'January': 1, 'February': 2, 'March': 3, 'April': 4,
+  'May': 5, 'June': 6, 'July': 7, 'August': 8,
+  'September': 9, 'October': 10, 'November': 11, 'December': 12,
+}
+
+function toICSDate(date: string, hhmm: string): string {
+  // date = "March 2", hhmm = "09:30"
+  const [monthName, dayStr] = date.split(' ')
+  const month = MONTH_MAP[monthName]
+  const day = parseInt(dayStr, 10)
+  const [h, m] = hhmm.split(':').map(Number)
+  // Store as UTC — Barcelona is UTC+1 in March
+  const utc = new Date(Date.UTC(YEAR, month - 1, day, h - 1, m, 0))
+  return utc.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+}
+
+function generateICS(event: Event): string {
+  const [startHHMM, endHHMM] = event.time_slot.split('-')
+  const dtstart = toICSDate(event.date, startHHMM)
+  const dtend   = toICSDate(event.date, endHHMM)
+  const uid     = `talent-arena-2026-${event.post_id}@talentarena.co`
+  const speakers = event.speakers.length > 0 ? `\nSpeakers: ${event.speakers.join(', ')}` : ''
+  const summary  = event.title.replace(/,/g, '\\,').replace(/;/g, '\\;')
+  const location = `${event.stage}, Talent Arena 2026, Barcelona`
+  const description = `${event.event_type.toUpperCase()}${speakers}`
+    .replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\\n')
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Talent Arena 2026//Agenda//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `SUMMARY:${summary}`,
+    `DTSTART:${dtstart}`,
+    `DTEND:${dtend}`,
+    `LOCATION:${location}`,
+    `DESCRIPTION:${description}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n')
+}
+
+function downloadICS(event: Event): void {
+  const ics = generateICS(event)
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `${event.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.ics`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, string> = {
@@ -164,6 +227,12 @@ function EventModal({ event, onClose }: { event: Event; onClose: () => void }) {
               {event.topic}
             </span>
           )}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn-add-to-calendar" onClick={() => downloadICS(event)}>
+            + Add to my calendar
+          </button>
         </div>
 
         {event.speakers.length > 0 && (
